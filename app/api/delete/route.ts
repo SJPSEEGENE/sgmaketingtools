@@ -1,17 +1,19 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
-async function isAdmin(userId:string){
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data } = await supabaseAdmin.from('profiles').select('role,status').eq('id',userId).single();
-  return data?.role === 'admin' && data?.status === 'approved';
-}
+import { getAdminSupabase } from '@/lib/supabase';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { userId, id } = await req.json();
-  if (!(await isAdmin(userId))) return NextResponse.json({ error:'forbidden' }, { status:403 });
-  const { data } = await supabaseAdmin.from('marketing_materials').select('storage_path').eq('id', id).single();
-  if (data?.storage_path) await supabaseAdmin.storage.from('marketing-materials').remove([data.storage_path]);
-  const { error } = await supabaseAdmin.from('marketing_materials').delete().eq('id', id);
-  if (error) return NextResponse.json({ error:error.message }, { status:500 });
-  return NextResponse.json({ ok:true });
+  try {
+    const { id } = await req.json();
+    if (!id) return NextResponse.json({ error: 'id 누락' }, { status: 400 });
+    const supabase = getAdminSupabase();
+    const { data: row, error: findError } = await supabase.from('marketing_materials').select('*').eq('id', id).single();
+    if (findError) throw findError;
+    if (row?.storage_path) await supabase.storage.from('marketing-materials').remove([row.storage_path]);
+    const { error } = await supabase.from('marketing_materials').delete().eq('id', id);
+    if (error) throw error;
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || '삭제 실패' }, { status: 500 });
+  }
 }

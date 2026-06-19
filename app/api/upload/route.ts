@@ -1,28 +1,41 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
-async function isAdmin(userId:string){
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data } = await supabaseAdmin.from('profiles').select('role,status').eq('id',userId).single();
-  return data?.role === 'admin' && data?.status === 'approved';
+import { getAdminSupabase } from '@/lib/supabase';
+export const dynamic = 'force-dynamic';
+
+function safeName(v: string) {
+  return v.replace(/[\\/:*?"<>|#%&{}$!'@+`=]/g, '_').replace(/\s+/g, '_');
 }
+
 export async function POST(req: Request) {
-  const supabaseAdmin = getSupabaseAdmin();
-  const form = await req.formData();
-  const userId = String(form.get('userId') || '');
-  if (!(await isAdmin(userId))) return NextResponse.json({ error:'forbidden' }, { status:403 });
-  const file = form.get('file') as File | null;
-  const category = String(form.get('category') || '');
-  const product_name = String(form.get('product_name') || '');
-  const material_type = String(form.get('material_type') || '');
-  const title = String(form.get('title') || `${product_name} ${material_type}`);
-  if (!file || !category || !product_name || !material_type) return NextResponse.json({ error:'missing fields' }, { status:400 });
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-  const path = `${category}/${product_name}/${material_type}/${Date.now()}_${safeName}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const { error: upErr } = await supabaseAdmin.storage.from('marketing-materials').upload(path, buffer, { contentType: file.type, upsert: true });
-  if (upErr) return NextResponse.json({ error: upErr.message }, { status:500 });
-  const { data: pub } = supabaseAdmin.storage.from('marketing-materials').getPublicUrl(path);
-  const { data, error } = await supabaseAdmin.from('marketing_materials').insert({ category, product_name, material_type, title, file_url: pub.publicUrl, storage_path: path, file_name: file.name, file_type: file.type, created_by: userId }).select().single();
-  if (error) return NextResponse.json({ error: error.message }, { status:500 });
-  return NextResponse.json({ material: data });
+  try {
+    const form = await req.formData();
+    const category = String(form.get('category') || '검사홍보');
+    const product_name = String(form.get('product_name') || '').trim();
+    const material_type = String(form.get('material_type') || '').trim();
+    const title = String(form.get('title') || `${product_name} ${material_type}`).trim();
+    const file = form.get('file') as File | null;
+    if (!product_name || !material_type || !file) {
+      return NextResponse.json({ error: '필수값이 누락되었습니다.' }, { status: 400 });
+    }
+    const supabase = getAdminSupabase();
+    const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
+    const storage_path = `${safeName(category)}/${safeName(product_name)}/${safeName(material_type)}/${Date.now()}_${safeName(file.name)}`;
+    const arrayBuffer = await file.arrayBuffer();
+    const { error: upError } = await supabase.storage
+      .from('marketing-materials')
+      .upload(storage_path, Buffer.from(arrayBuffer), {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false
+      });
+    if (upError) throw upError;
+    const { data: pub } = supabase.storage.from('marketing-materials').getPublicUrl(storage_path);
+    const file_url = pub.publicUrl;
+    const { data, error } = await supabase.from('marketing_materials').insert({
+      category, product_name, material_type, title, file_url, storage_path, file_type: file.type || `application/${ext}`
+    }).select('*').single();
+    if (error) throw error;
+    return NextResponse.json({ material: data });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || '업로드 실패' }, { status: 500 });
+  }
 }

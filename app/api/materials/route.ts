@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { getAdminSupabase } from '@/lib/supabase';
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin.from('marketing_materials').select('*').eq('is_active', true).order('created_at', { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ materials: data || [] });
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('marketing_materials')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return NextResponse.json({ materials: data || [] });
+  } catch (e: any) {
+    return NextResponse.json({ materials: [], error: e.message }, { status: 200 });
+  }
 }
